@@ -45,6 +45,16 @@ def compare_masked_softmax(vector, mask):
     assert np.allclose(result1, result2), "The results of the two masked_softmax implementations do not match."
     print("Masked softmax results match!")
 
+def compare_layer_norm(vector):
+    result1 = utils.layer_norm.layer_norm(vector)
+    result1 = np.array(result1)
+
+    layer_norm = torch.nn.LayerNorm(len(vector))
+    result2 = layer_norm(torch.tensor(vector)).detach().numpy()
+    
+    assert np.allclose(result1, result2), "The results of the two layer_norm implementations do not match."
+    print("Layer norm results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -68,3 +78,4 @@ if __name__ == "__main__":
     compare_transpose_matrix(mat1)
     compare_softmax(vec1)
     compare_masked_softmax(vec1, mask)
+    compare_layer_norm(vec1)
