@@ -150,6 +150,29 @@ def compare_multi_head_attention(x, weights, mask=None):
     assert np.allclose(result1, result2), "The results of the two multi_head_attention implementations do not match."
     print("Multi-head attention results match!")
 
+def compare_feed_forward(x, weights):
+    result1 = layers.feed_forward.feed_forward(x, weights)
+    result1 = np.array(result1)
+
+    (W1, b1), (W2, b2) = weights
+    x_t = torch.tensor(x, dtype=torch.float32)
+
+    linear1 = torch.nn.Linear(len(W1), len(W1[0]))
+    linear1.weight.data = torch.tensor(np.array(W1).T, dtype=torch.float32)
+    linear1.bias.data = torch.tensor(b1, dtype=torch.float32)
+
+    gelu_activation = torch.nn.GELU(approximate='tanh')
+
+    linear2 = torch.nn.Linear(len(W2), len(W2[0]))
+    linear2.weight.data = torch.tensor(np.array(W2).T, dtype=torch.float32)
+    linear2.bias.data = torch.tensor(b2, dtype=torch.float32)
+    
+    result2_t = linear2(gelu_activation(linear1(x_t)))
+    result2 = result2_t.detach().numpy()
+
+    assert np.allclose(result1, result2), "The results of the feed_forward implementations do not match."
+    print("Feed-forward network results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -180,6 +203,8 @@ if __name__ == "__main__":
     weight_matrix, bias_vector = layers.linear_layer.init_random_linear(embedding_dim, embedding_dim)
     vec_input = [0.5 for _ in range(embedding_dim)]
     weights = layers.multi_head_attention.init_multi_head_attention(d_model=embedding_dim, num_heads=2)
+    
+    weights_ffn = layers.feed_forward.init_feed_forward(d_model=embedding_dim, d_ff=embedding_dim * 4)
 
     compare_matmul(mat1, mat2)
     compare_add_matrices(mat3, mat4)
@@ -193,3 +218,4 @@ if __name__ == "__main__":
     compare_linear_layer(vec_input, weight_matrix, bias_vector)
     compare_scaled_dot_product_attention(token_embeddings, token_embeddings, token_embeddings)
     compare_multi_head_attention(token_embeddings, weights)
+    compare_feed_forward(token_embeddings, weights_ffn)
