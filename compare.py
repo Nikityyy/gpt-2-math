@@ -298,7 +298,7 @@ def compare_gpt_decoder(x, weights, mask=None):
     result1 = model.gpt_decoder.gpt_decoder(x, weights, mask)
     result1 = np.array(result1)
 
-    block_weights_list, final_ln_weights = weights
+    block_weights_list = weights
     num_layers = len(block_weights_list)
     
     _, _, d_model, num_heads, _ = block_weights_list[0][0]
@@ -354,13 +354,8 @@ def compare_gpt_decoder(x, weights, mask=None):
         ffn_output_t = torch_ffn(normed_residual1_t)
         
         hidden_state_t = residual1_t + ffn_output_t
-
-    final_gamma, final_beta = final_ln_weights
-    torch_final_ln = torch.nn.LayerNorm(d_model)
-    torch_final_ln.weight.data = torch.tensor(final_gamma, dtype=torch.float32)
-    torch_final_ln.bias.data = torch.tensor(final_beta, dtype=torch.float32)
     
-    result2_t = torch_final_ln(hidden_state_t)
+    result2_t = hidden_state_t
     result2 = result2_t.detach().numpy()
 
     assert np.allclose(result1, result2), "The results of the gpt_decoder implementations do not match."

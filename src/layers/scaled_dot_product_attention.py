@@ -11,9 +11,12 @@ def _scale_tensor(tensor, scale_factor):
         return tensor / scale_factor
 
 def scaled_dot_product_attention(queries, keys, values, mask=None):
-    is_3d = isinstance(queries[0][0], list)
-    keys_batch = keys if is_3d else [keys]
-    dk = len(keys_batch[0][0])
+    if keys and isinstance(keys[0], list) and isinstance(keys[0][0], list):
+        dk = len(keys[0][0])
+    elif keys and isinstance(keys[0], list):
+        dk = len(keys[0])
+    else:
+        raise ValueError("Invalid shape for keys in scaled_dot_product_attention")
 
     scores = matmul(queries, transpose_matrix(keys))
     # Scale scores
