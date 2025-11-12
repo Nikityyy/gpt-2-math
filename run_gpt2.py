@@ -91,7 +91,7 @@ def load_and_map_gpt2_weights():
 
         # Attention output projection layer
         my_weights["decoder"][i][0][1] = (
-            tensor_to_list(pretrained_weights[f"transformer.h.{i}.attn.c_proj.weight"].T),
+            tensor_to_list(pretrained_weights[f"transformer.h.{i}.attn.c_proj.weight"]),
             tensor_to_list(pretrained_weights[f"transformer.h.{i}.attn.c_proj.bias"])
         )
         

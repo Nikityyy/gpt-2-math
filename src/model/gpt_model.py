@@ -2,6 +2,7 @@
 import random
 import src.embeddings as embeddings
 from src.utils.softmax import softmax
+from src.utils.layer_norm import layer_norm, init_layer_norm
 from src.utils.transpose_matrix import transpose_matrix
 from .gpt_decoder import gpt_decoder, init_gpt_decoder
 from .output_projection import output_projection
@@ -9,8 +10,9 @@ from .output_projection import output_projection
 def init_gpt_model(vocab_size, d_model, num_layers, num_heads, d_ff, max_seq_len):
     weights = {
         "token_embeddings": embeddings.token_embeddings.init_random_embeddings(vocab_size, d_model),
-        "positional_encodings": embeddings.positional_encoding.sinusoidal_positional_encoding(max_seq_len, d_model),
-        "decoder": init_gpt_decoder(num_layers, d_model, num_heads, d_ff)
+        "positional_encodings": embeddings.token_embeddings.init_random_embeddings(max_seq_len, d_model),
+        "decoder": init_gpt_decoder(num_layers, d_model, num_heads, d_ff),
+        "final_layer_norm": init_layer_norm(d_model)
     }
     return weights
 
@@ -24,9 +26,12 @@ def gpt_model_forward(batch_token_ids, weights, mask=None):
     decoder_weights = weights["decoder"]
     decoder_output = gpt_decoder(x, decoder_weights, mask)
 
+    final_ln_gamma, final_ln_beta = weights["final_layer_norm"]
+    normed_decoder_output = layer_norm(decoder_output, final_ln_gamma, final_ln_beta)
+
     projection_weight = transpose_matrix(token_embedding_matrix)
-    logits = output_projection(decoder_output, projection_weight)
-    
+    logits = output_projection(normed_decoder_output, projection_weight)
+
     return logits
 
 def generate(weights, prompt_token_ids, max_new_tokens, temperature=1.0, top_k=10):

@@ -400,8 +400,11 @@ def compare_gpt_model_forward(batch_token_ids, weights, mask=None):
     decoder_weights = weights["decoder"]
     decoder_output = model.gpt_decoder.gpt_decoder(x, decoder_weights, mask)
 
+    final_ln_gamma, final_ln_beta = weights["final_layer_norm"]
+    normed_decoder_output = utils.layer_norm.layer_norm(decoder_output, final_ln_gamma, final_ln_beta)
+
     projection_weight = utils.transpose_matrix.transpose_matrix(token_embeds_matrix)
-    logits = model.output_projection.output_projection(decoder_output, projection_weight)
+    logits = model.output_projection.output_projection(normed_decoder_output, projection_weight)
     
     result2 = np.array(logits)
 
