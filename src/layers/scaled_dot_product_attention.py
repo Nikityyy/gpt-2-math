@@ -4,25 +4,25 @@ from src.utils.transpose_matrix import transpose_matrix
 from src.utils.masked_softmax import masked_softmax
 from src.utils.softmax import softmax
 
-def scaled_dot_product_attention(queries, keys, values, mask=None):
-    # Check if batched
-    if len(queries) > 0 and isinstance(queries[0][0], list):
-        dk = len(keys[0][0])
+def _scale_tensor(tensor, scale_factor):
+    if isinstance(tensor, list):
+        return [_scale_tensor(item, scale_factor) for item in tensor]
     else:
-        dk = len(keys[0])
+        return tensor / scale_factor
+
+def scaled_dot_product_attention(queries, keys, values, mask=None):
+    is_3d = isinstance(queries[0][0], list)
+    keys_batch = keys if is_3d else [keys]
+    dk = len(keys_batch[0][0])
+
     scores = matmul(queries, transpose_matrix(keys))
     # Scale scores
-    if len(scores) > 0 and isinstance(scores[0][0], list):
-        # 3D
-        scaled_scores = [[[score / math.sqrt(dk) for score in row] for row in batch] for batch in scores]
-    else:
-        # 2D
-        scaled_scores = [[score / math.sqrt(dk) for score in row] for row in scores]
+    scaled_scores = _scale_tensor(scores, math.sqrt(dk))
     
     if mask is not None:
-        scaled_scores = masked_softmax(scaled_scores, mask)
+        attention_weights = masked_softmax(scaled_scores, mask)
     else:
-        scaled_scores = softmax(scaled_scores)
+        attention_weights = softmax(scaled_scores)
     
-    output = matmul(scaled_scores, values)
+    output = matmul(attention_weights, values)
     return output

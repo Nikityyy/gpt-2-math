@@ -1,6 +1,6 @@
 import random
 from src.utils.matrix_multiply import matmul
-from src.utils.add_matrices import add_matrices
+from src.utils.add_matrices import add_vectors
 
 def init_random_linear(in_dim, out_dim):
     weight_matrix = [[random.gauss(0, 0.02) for _ in range(out_dim)] for _ in range(in_dim)]
@@ -9,6 +9,5 @@ def init_random_linear(in_dim, out_dim):
 
 def linear_layer(input_vector, weight_matrix, bias_vector):
     output_vector = matmul([input_vector], weight_matrix)[0]
-    output_vector = add_matrices([output_vector], [bias_vector])[0]
+    output_vector = add_vectors(output_vector, bias_vector)
     return output_vector
-
