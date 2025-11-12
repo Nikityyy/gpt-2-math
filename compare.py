@@ -47,13 +47,21 @@ def compare_masked_softmax(vector, mask):
     assert np.allclose(result1, result2), "The results of the two masked_softmax implementations do not match."
     print("Masked softmax results match!")
 
-def compare_layer_norm(vector):
-    result1 = utils.layer_norm.layer_norm(vector)
+def compare_layer_norm(input_data):
+    result1 = utils.layer_norm.layer_norm(input_data)
     result1 = np.array(result1)
 
-    layer_norm = torch.nn.LayerNorm(len(vector))
-    result2 = layer_norm(torch.tensor(vector)).detach().numpy()
-    
+    input_tensor = torch.tensor(input_data, dtype=torch.float32)
+
+    normalized_shape = input_tensor.shape[-1]
+
+    torch_ln = torch.nn.LayerNorm(normalized_shape)
+
+    torch_ln.weight.data.fill_(1.0)
+    torch_ln.bias.data.fill_(0.0)
+
+    result2 = torch_ln(input_tensor).detach().numpy()
+
     assert np.allclose(result1, result2), "The results of the two layer_norm implementations do not match."
     print("Layer norm results match!")
 
@@ -131,6 +139,10 @@ def compare_multi_head_attention(x, weights, mask=None):
     x_t = torch.tensor(x, dtype=torch.float32)
     Wo_t = torch.tensor(Wo, dtype=torch.float32)
     
+    torch_mask = None
+    if mask is not None:
+        torch_mask = ~torch.tensor(mask, dtype=torch.bool)
+    
     torch_head_outputs = []
     for h in range(num_heads):
         Wq_h, Wk_h, Wv_h = qkv_weights[h]
@@ -140,7 +152,13 @@ def compare_multi_head_attention(x, weights, mask=None):
         keys_h_t = torch.matmul(x_t, Wk_h_t)
         values_h_t = torch.matmul(x_t, Wv_h_t)
         
-        head_output = torch.nn.functional.scaled_dot_product_attention(queries_h_t, keys_h_t, values_h_t, attn_mask=None)
+        d_k = queries_h_t.size(-1)
+        scores = torch.matmul(queries_h_t, keys_h_t.transpose(-2, -1)) / np.sqrt(d_k)
+        if torch_mask is not None:
+            scores = scores.masked_fill(torch_mask, -float('inf'))
+        attention_weights = torch.nn.functional.softmax(scores, dim=-1)
+        head_output = torch.matmul(attention_weights, values_h_t)
+        
         torch_head_outputs.append(head_output)
 
     concatenated_t = torch.cat(torch_head_outputs, dim=-1)
@@ -173,49 +191,119 @@ def compare_feed_forward(x, weights):
     assert np.allclose(result1, result2), "The results of the feed_forward implementations do not match."
     print("Feed-forward network results match!")
 
-if __name__ == "__main__":
-    mat1 = [[1, 2, 3],
-            [4, 5, 6]]
-    
-    mat2 = [[7, 8],
-            [9, 10],
-            [11, 12]]
-    
-    mat3 = [[1, 2, 3],
-            [4, 5, 6]]
-    
-    mat4 = [[7, 8, 9],
-            [10, 11, 12]]
-    
-    vec1 = [1.0, 2.0, 3.0, 4.0]
-    
-    mask = [1, 0, 1, 1]
-    
-    vocab_size = 10
-    sequence_length = 6
-    embedding_dim = 4
-    emb = embeddings.token_embeddings.init_random_embeddings(vocab_size, embedding_dim)
-    batch_token_ids = [[0, 1, 2], [3, 4, 5]]
-    
-    token_embeddings = embeddings.token_embeddings.token_embeddings_lookup(emb, batch_token_ids)
-    positional_encodings = embeddings.positional_encoding.sinusoidal_positional_encoding(sequence_length, embedding_dim)
-    
-    weight_matrix, bias_vector = layers.linear_layer.init_random_linear(embedding_dim, embedding_dim)
-    vec_input = [0.5 for _ in range(embedding_dim)]
-    weights = layers.multi_head_attention.init_multi_head_attention(d_model=embedding_dim, num_heads=2)
-    
-    weights_ffn = layers.feed_forward.init_feed_forward(d_model=embedding_dim, d_ff=embedding_dim * 4)
+def compare_transformer_block(x, weights, mask=None):
+    result1 = layers.transformer_block.transformer_block(x, weights, mask)
+    result1 = np.array(result1)
 
+    mha_weights, ffn_weights = weights
+    qkv_weights, Wo, d_model, num_heads, d_head = mha_weights
+    (W1, b1), (W2, b2) = ffn_weights
+    
+    x_t = torch.tensor(x, dtype=torch.float32)
+
+    torch_ln1 = torch.nn.LayerNorm(d_model)
+    torch_ln1.weight.data.fill_(1.0)
+    torch_ln1.bias.data.fill_(0.0)
+    
+    torch_ln2 = torch.nn.LayerNorm(d_model)
+    torch_ln2.weight.data.fill_(1.0)
+    torch_ln2.bias.data.fill_(0.0)
+    
+    torch_ffn = torch.nn.Sequential(
+        torch.nn.Linear(d_model, len(W1[0])),
+        torch.nn.GELU(approximate='tanh'),
+        torch.nn.Linear(len(W2), len(W2[0]))
+    )
+    torch_ffn[0].weight.data = torch.tensor(np.array(W1).T, dtype=torch.float32)
+    torch_ffn[0].bias.data = torch.tensor(b1, dtype=torch.float32)
+    torch_ffn[2].weight.data = torch.tensor(np.array(W2).T, dtype=torch.float32)
+    torch_ffn[2].bias.data = torch.tensor(b2, dtype=torch.float32)
+    
+    torch_ffn.eval()
+
+    normed_x_t = torch_ln1(x_t)
+    
+    torch_mask = ~torch.tensor(mask, dtype=torch.bool) if mask is not None else None
+    
+    torch_head_outputs = []
+    for h in range(num_heads):
+        Wq_h, Wk_h, Wv_h = qkv_weights[h]
+        Wq_h_t, Wk_h_t, Wv_h_t = map(lambda w: torch.tensor(w, dtype=torch.float32), (Wq_h, Wk_h, Wv_h))
+        
+        queries_h_t = torch.matmul(normed_x_t, Wq_h_t)
+        keys_h_t = torch.matmul(normed_x_t, Wk_h_t)
+        values_h_t = torch.matmul(normed_x_t, Wv_h_t)
+        
+        d_k = queries_h_t.size(-1)
+        scores = torch.matmul(queries_h_t, keys_h_t.transpose(-2, -1)) / np.sqrt(d_k)
+        if torch_mask is not None:
+            scores = scores.masked_fill(torch_mask, -float('inf'))
+        attention_weights = torch.nn.functional.softmax(scores, dim=-1)
+        head_output = torch.matmul(attention_weights, values_h_t)
+        torch_head_outputs.append(head_output)
+
+    concatenated_t = torch.cat(torch_head_outputs, dim=-1)
+    attn_output_t = torch.matmul(concatenated_t, torch.tensor(Wo, dtype=torch.float32))
+    
+    residual1_t = x_t + attn_output_t
+    
+    normed_residual1_t = torch_ln2(residual1_t)
+    ffn_output_t = torch_ffn(normed_residual1_t)
+    result2_t = residual1_t + ffn_output_t
+    
+    result2 = result2_t.detach().numpy()
+
+    assert np.allclose(result1, result2), "The results of the transformer_block implementations do not match."
+    print("Transformer block results match!")
+
+if __name__ == "__main__":
+    vocab_size = 10
+    batch_size = 2
+    sequence_length = 3
+    embedding_dim = 4
+    num_heads = 2
+    d_ff = embedding_dim * 4
+
+    emb = embeddings.token_embeddings.init_random_embeddings(vocab_size, embedding_dim)
+    
+    batch_token_ids = np.random.randint(0, vocab_size, size=(batch_size, sequence_length)).tolist()
+    
+    token_embeddings_val = embeddings.token_embeddings.token_embeddings_lookup(emb, batch_token_ids)
+    
+    positional_encodings = embeddings.positional_encoding.sinusoidal_positional_encoding(sequence_length * 2, embedding_dim)
+    
+    attention_mask = [[True] * (i + 1) + [False] * (sequence_length - 1 - i) for i in range(sequence_length)]
+
+    # --- Initialize Weights ---
+    weight_matrix, bias_vector = layers.linear_layer.init_random_linear(embedding_dim, embedding_dim)
+    mha_weights_for_test = layers.multi_head_attention.init_multi_head_attention(d_model=embedding_dim, num_heads=num_heads)
+    ffn_weights_for_test = layers.feed_forward.init_feed_forward(d_model=embedding_dim, d_ff=d_ff)
+    block_weights_for_test = layers.transformer_block.init_transformer_block(embedding_dim, num_heads, d_ff)
+
+    mat1 = [[1, 2], [3, 4]]
+    mat2 = [[5, 6], [7, 8]]
+    vec1 = [1.0, 2.0, 3.0, 4.0]
+    mask_1d = [True, False, True, True]
+    
+    print("--- Testing Utils ---")
     compare_matmul(mat1, mat2)
-    compare_add_matrices(mat3, mat4)
+    compare_add_matrices(mat1, mat2)
     compare_transpose_matrix(mat1)
     compare_softmax(vec1)
-    compare_masked_softmax(vec1, mask)
-    compare_layer_norm(vec1)
+    compare_masked_softmax(vec1, mask_1d)
+    compare_layer_norm(vec1) # Test 1D
+    compare_layer_norm(token_embeddings_val) # Test 3D
+
+    print("\n--- Testing Embeddings ---")
     compare_token_embeddings_lookup(emb, batch_token_ids)
     compare_positional_encoding(sequence_length, embedding_dim)
-    compare_embeddings_layer(token_embeddings, positional_encodings)
-    compare_linear_layer(vec_input, weight_matrix, bias_vector)
-    compare_scaled_dot_product_attention(token_embeddings, token_embeddings, token_embeddings)
-    compare_multi_head_attention(token_embeddings, weights)
-    compare_feed_forward(token_embeddings, weights_ffn)
+    compare_embeddings_layer(token_embeddings_val, positional_encodings)
+    
+    print("\n--- Testing Layers ---")
+    compare_linear_layer([0.5] * embedding_dim, weight_matrix, bias_vector)
+    compare_scaled_dot_product_attention(token_embeddings_val, token_embeddings_val, token_embeddings_val, mask=attention_mask)
+    compare_multi_head_attention(token_embeddings_val, mha_weights_for_test, mask=attention_mask)
+    compare_feed_forward(token_embeddings_val, ffn_weights_for_test)
+    
+    print("\n--- Testing Full Transformer Block ---")
+    compare_transformer_block(token_embeddings_val, block_weights_for_test, mask=attention_mask)
