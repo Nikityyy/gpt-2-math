@@ -5,6 +5,7 @@ import src.utils as utils
 import src.embeddings as embeddings
 import src.layers as layers
 import src.model as model
+import src.model.gpt_model as gpt_model
 
 def compare_matmul(matrix1, matrix2):
     result1 = utils.matrix_multiply.matmul(matrix1, matrix2)
@@ -384,10 +385,29 @@ def compare_output_projection(x, token_embedding_matrix):
     assert np.allclose(result1, result2), "The results of the output_projection implementations do not match."
     print("Output projection results match!")
 
+def compare_gpt_model_forward(batch_token_ids, weights, mask=None):
+    result1 = gpt_model.gpt_model_forward(batch_token_ids, weights, mask)
+    result1 = np.array(result1)
+
+    token_embeds_matrix = weights["token_embeddings"]
+    token_embeds = embeddings.token_embeddings.token_embeddings_lookup(token_embeds_matrix, batch_token_ids)
+    pos_encodings = weights["positional_encodings"]
+    x = embeddings.embeddings_layer.embeddings_layer(token_embeds, pos_encodings)
+
+    decoder_weights = weights["decoder"]
+    decoder_output = model.gpt_decoder.gpt_decoder(x, decoder_weights, mask)
+
+    logits = model.output_projection.output_projection(decoder_output, token_embeds_matrix)
+    result2 = np.array(logits)
+
+    assert np.allclose(result1, result2), "The results of the gpt_model_forward pass do not match the component-wise pass."
+    print("GPT model forward pass results match!")
+
 if __name__ == "__main__":
     vocab_size = 10
     batch_size = 2
     sequence_length = 3
+    max_seq_len = 10
     embedding_dim = 4
     num_layers = 2
     num_heads = 2
@@ -408,6 +428,8 @@ if __name__ == "__main__":
     ffn_weights_for_test = layers.feed_forward.init_feed_forward(d_model=embedding_dim, d_ff=d_ff)
     block_weights_for_test = layers.transformer_block.init_transformer_block(embedding_dim, num_heads, d_ff)
 
+    model_weights = gpt_model.init_gpt_model(vocab_size, embedding_dim, num_layers, num_heads, d_ff, max_seq_len)
+
     mat1 = [[1, 2], [3, 4]]
     mat2 = [[5, 6], [7, 8]]
     vec1 = [1.0, 2.0, 3.0, 4.0]
@@ -415,10 +437,8 @@ if __name__ == "__main__":
     
     block_weights_for_test = layers.transformer_block.init_transformer_block(embedding_dim, num_heads, d_ff)
     
-    # Add new initialization for the decoder
     decoder_weights_for_test = model.gpt_decoder.init_gpt_decoder(num_layers, embedding_dim, num_heads, d_ff)
     
-    # Pre-compute embeddings for input to layers
     embeddings_output = embeddings.embeddings_layer.embeddings_layer(token_embeddings_val, positional_encodings)
     
     print("--- Testing Utils ---")
@@ -451,3 +471,6 @@ if __name__ == "__main__":
     print("\n--- Testing Output Projection ---")
     token_embedding_matrix = [emb[i] for i in range(vocab_size)]
     compare_output_projection(decoder_output, token_embedding_matrix)
+
+    print("\n--- Testing Full GPT Model Forward Pass ---")
+    compare_gpt_model_forward(batch_token_ids, model_weights, mask=attention_mask)
