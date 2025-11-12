@@ -109,6 +109,20 @@ def compare_linear_layer(input_vector, weight_matrix, bias_vector):
     assert np.allclose(result1, result2), "The results of the two linear_layer implementations do not match."
     print("Linear layer results match!")
 
+def compare_scaled_dot_product_attention(queries, keys, values, mask=None):
+    result1 = layers.scaled_dot_product_attention.scaled_dot_product_attention(queries, keys, values, mask)
+    result1 = np.array(result1)
+
+    result2 = torch.nn.functional.scaled_dot_product_attention(
+        torch.tensor(queries, dtype=torch.float32),
+        torch.tensor(keys, dtype=torch.float32),
+        torch.tensor(values, dtype=torch.float32),
+        attn_mask=None if mask is None else torch.tensor(mask, dtype=torch.bool)
+    ).detach().numpy()
+
+    assert np.allclose(result1, result2), "The results of the two scaled_dot_product_attention implementations do not match."
+    print("Scaled dot-product attention results match!")
+
 if __name__ == "__main__":
     mat1 = [[1, 2, 3],
             [4, 5, 6]]
@@ -149,3 +163,4 @@ if __name__ == "__main__":
     compare_positional_encoding(sequence_length, embedding_dim)
     compare_embeddings_layer(token_embeddings, positional_encodings)
     compare_linear_layer(vec_input, weight_matrix, bias_vector)
+    compare_scaled_dot_product_attention(token_embeddings, token_embeddings, token_embeddings)
